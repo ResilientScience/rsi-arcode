@@ -296,6 +296,27 @@ class BitFile:
             raise ValueError('I/O operation on opened file.')
         return
 
+    def use_stream(self, file_like_object, mode):
+        if self._stream is None or self._stream.closed:
+            if 't' in mode or 'U' in mode:
+                raise ValueError('text mode not supported.')
+
+            if 'b' not in mode:
+                # Force binary mode in case this we're using ms windows.
+                mode = mode + 'b'
+
+            self._stream = file_like_object
+
+            if hasattr(file_like_object, 'mode'):
+                if file_like_object.mode != mode:
+                    raise ValueError('stream mode (%r) does not match file '
+                                     'mode (%r).' % (file_like_object.mode,
+                                                     mode))
+            self._mode = mode
+        else:
+            raise ValueError('I/O operation on opened file.')
+        return
+
     def close(self):
         """Close a BitFile stream.
 

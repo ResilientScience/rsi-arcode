@@ -259,24 +259,42 @@ class ArithmeticCode:
         if (self._infile is not None) or (self._outfile is not None):
             raise ValueError('I/O operation on opened file.')
 
+        with open(input_file_name, 'rb') as _infile:
+            self._infile = _infile
+            self._outfile = bitfile.BitFile()
+            self._outfile.open(output_file_name, 'wb')
+            self._encode()
+            self._infile.close()
+            self._outfile.close()
+
+    def encode_stream(self, in_stream, out_stream):
+        """Use arithmetic coding to encode from a file-like object to
+        a file-like object.
+        """
+        if (self._infile is not None) or (self._outfile is not None):
+            raise ValueError('I/O operation on opened file.')
+
+        self._infile = in_stream
+        self._outfile = bitfile.BitFile()
+        self._outfile.use_stream(out_stream, 'wb')
+        self._encode()
+        self._infile = None
+        self._outfile = None
+
+    def _encode(self):
+        """Once _infile and _outfile are set, actually perform the
+        encoding.
+        """
         if self._static_model:
             # read through input file and compute ranges
-            self._infile = open(input_file_name, 'rb')
             self.build_probability_range_list()
             self._infile.seek(0)
 
             # write header with ranges to output file
-            self._outfile = bitfile.BitFile()
-            self._outfile.open(output_file_name, 'wb')
             self.write_header()
         else:
             # initialize probability ranges assuming uniform distribution
             self.initialize_adaptive_probability_range_list()
-
-            # open input and output files
-            self._infile = open(input_file_name, 'rb')
-            self._outfile = bitfile.BitFile()
-            self._outfile.open(output_file_name, 'wb')
 
         # encode file 1 byte at at time
         c = self._infile.read(1)
@@ -285,12 +303,9 @@ class ArithmeticCode:
             self.write_encoded_bits()
             c = self._infile.read(1)
 
-        self._infile.close()
         self.apply_symbol_range(EOF_CHAR)   # encode an EOF
         self.write_encoded_bits()
-
         self.write_remaining()              # write out least significant bits
-        self._outfile.close()
 
     def build_probability_range_list(self):
         """Fill _ranges with the probability values for the input file.
@@ -685,6 +700,49 @@ class ArithmeticCode:
 
         self._outfile.close()
         self._infile.close()
+
+    def decode_stream(self, in_stream, out_stream):
+        """Use arithmetic coding to decode a data from a file-like
+        object to a file-like object.
+        """
+
+        if (self._infile is not None) or (self._outfile is not None):
+            raise ValueError('I/O operation on opened file.')
+
+        # open input and build probability ranges from header in file
+        self._infile = bitfile.BitFile()
+        self._infile.use_stream(in_stream, 'rb')
+
+        if self._static_model:
+            self.read_header()  # build probability ranges from header in file
+        else:
+            # initialize probability ranges assuming uniform distribution
+            self.initialize_adaptive_probability_range_list()
+
+        # read start of code and initialize bounds
+        self.initialize_decoder()
+
+        self._outfile = out_stream
+
+        # decode one symbol at a time
+        while True:
+            # get the unscaled probability of the current symbol
+            unscaled = self.get_unscaled_code()
+
+            # figure out which symbol has the above probability
+            c = self.get_symbol_from_probability(unscaled)
+            if c == EOF_CHAR:
+                # no more symbols
+                break
+
+            self._outfile.write(chr(c))
+
+            # factor out symbol
+            self.apply_symbol_range(c)
+            self.read_encoded_bits()
+
+        self._infile = None
+        self._outfile = None
 
     def read_header(self):
         """Read header containing symbol probabilities.
