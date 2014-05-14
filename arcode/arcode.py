@@ -264,7 +264,6 @@ class ArithmeticCode:
             self._outfile = bitfile.BitFile()
             self._outfile.open(output_file_name, 'wb')
             self._encode()
-            self._infile.close()
             self._outfile.close()
 
     def encode_stream(self, in_stream, out_stream):
@@ -667,39 +666,12 @@ class ArithmeticCode:
             raise ValueError('I/O operation on opened file.')
 
         # open input and build probability ranges from header in file
-        self._infile = bitfile.BitFile()
-        self._infile.open(input_file_name, 'rb')
-
-        if self._static_model:
-            self.read_header()  # build probability ranges from header in file
-        else:
-            # initialize probability ranges assuming uniform distribution
-            self.initialize_adaptive_probability_range_list()
-
-        # read start of code and initialize bounds
-        self.initialize_decoder()
-
-        self._outfile = open(output_file_name, 'wb')
-
-        # decode one symbol at a time
-        while True:
-            # get the unscaled probability of the current symbol
-            unscaled = self.get_unscaled_code()
-
-            # figure out which symbol has the above probability
-            c = self.get_symbol_from_probability(unscaled)
-            if c == EOF_CHAR:
-                # no more symbols
-                break
-
-            self._outfile.write(chr(c))
-
-            # factor out symbol
-            self.apply_symbol_range(c)
-            self.read_encoded_bits()
-
-        self._outfile.close()
-        self._infile.close()
+        with open(output_file_name, 'wb') as _outfile:
+            self._outfile = _outfile
+            self._infile = bitfile.BitFile()
+            self._infile.open(input_file_name, 'rb')
+            self._decode()
+            self._infile.close()
 
     def decode_stream(self, in_stream, out_stream):
         """Use arithmetic coding to decode a data from a file-like
@@ -709,9 +681,17 @@ class ArithmeticCode:
         if (self._infile is not None) or (self._outfile is not None):
             raise ValueError('I/O operation on opened file.')
 
-        # open input and build probability ranges from header in file
+        self._outfile = out_stream
         self._infile = bitfile.BitFile()
         self._infile.use_stream(in_stream, 'rb')
+        self._decode()
+        self._infile = None
+        self._outfile = None
+
+    def _decode(self):
+        """Once _infile and _outfile have been set-up, actually
+        perform decoding.
+        """
 
         if self._static_model:
             self.read_header()  # build probability ranges from header in file
@@ -721,8 +701,6 @@ class ArithmeticCode:
 
         # read start of code and initialize bounds
         self.initialize_decoder()
-
-        self._outfile = out_stream
 
         # decode one symbol at a time
         while True:
@@ -740,9 +718,6 @@ class ArithmeticCode:
             # factor out symbol
             self.apply_symbol_range(c)
             self.read_encoded_bits()
-
-        self._infile = None
-        self._outfile = None
 
     def read_header(self):
         """Read header containing symbol probabilities.
